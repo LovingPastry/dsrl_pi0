@@ -26,11 +26,15 @@ def _init_replay_dict(obs_space: gym.Space,
 
 
 class ReplayBuffer(Dataset):
-    
-    def __init__(self, observation_space: gym.Space, action_space: gym.Space, capacity: int, ):
+
+    def __init__(self, observation_space: gym.Space, action_space: gym.Space, capacity: int,
+                 extra_fields=None):
         self.observation_space = observation_space
         self.action_space = action_space
         self.capacity = capacity
+        # extra_fields: {name: (shape, dtype)} for additional per-step data
+        # (e.g. denoised env-action chunks for DSRL-NA)
+        self.extra_fields = dict(extra_fields) if extra_fields else {}
 
         print("making replay buffer of capacity ", self.capacity)
 
@@ -51,6 +55,8 @@ class ReplayBuffer(Dataset):
             'masks': masks,
             'discount': discount,
         }
+        for name, (shape, dtype) in self.extra_fields.items():
+            self.data[name] = np.empty((self.capacity, *shape), dtype=dtype)
 
         self.size = 0
         self._traj_counter = 0
@@ -132,6 +138,8 @@ class ReplayBuffer(Dataset):
                 'masks': masks,
                 'discount': discount,
             }
+            for name, (shape, dtype) in self.extra_fields.items():
+                data_new[name] = np.empty((self.capacity, *shape), dtype=dtype)
 
             for x in data_new:
                 if isinstance(self.data[x], np.ndarray):

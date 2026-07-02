@@ -12,8 +12,7 @@ from openpi_client import image_tools
 from moviepy.editor import ImageSequenceClip
 
 
-def trajwise_alternating_training_loop(variant, agent, env, eval_env, online_replay_buffer, replay_buffer, wandb_logger,
-                                       shard_fn=None, agent_dp=None, robot_config=None):
+def trajwise_alternating_training_loop(variant, agent, env, eval_env, online_replay_buffer, replay_buffer, tb_logger,shard_fn=None, agent_dp=None, robot_config=None):
     replay_buffer_iterator = replay_buffer.get_iterator(variant.batch_size)
     if shard_fn is not None:
         replay_buffer_iterator = map(shard_fn, replay_buffer_iterator)
@@ -21,13 +20,13 @@ def trajwise_alternating_training_loop(variant, agent, env, eval_env, online_rep
     i = 0
     total_env_steps = 0
     total_num_traj = 0
-    wandb_logger.log({'num_online_samples': 0}, step=i)
-    wandb_logger.log({'num_online_trajs': 0}, step=i)
-    wandb_logger.log({'env_steps': 0}, step=i)
+    tb_logger.log({'num_online_samples': 0}, step=i)
+    tb_logger.log({'num_online_trajs': 0}, step=i)
+    tb_logger.log({'env_steps': 0}, step=i)
    
     with tqdm(total=variant.max_steps, initial=0) as pbar:
         while i <= variant.max_steps:
-            traj = collect_traj(variant, agent, env, i, agent_dp, wandb_logger, total_num_traj, robot_config)
+            traj = collect_traj(variant, agent, env, i, agent_dp, tb_logger, total_num_traj, robot_config)
             total_num_traj += 1
             add_online_data_to_buffer(variant, traj, online_replay_buffer)
             total_env_steps += traj['env_steps']
@@ -53,20 +52,20 @@ def trajwise_alternating_training_loop(variant, agent, env, eval_env, online_rep
                         update_info = {k: jax.device_get(v) for k, v in update_info.items()}
                         for k, v in update_info.items():
                             if v.ndim == 0:
-                                wandb_logger.log({f'training/{k}': v}, step=i)
+                                tb_logger.log({f'training/{k}': v}, step=i)
                             elif v.ndim <= 2:
-                                wandb_logger.log_histogram(f'training/{k}', v, i)
-                        wandb_logger.log({
+                                tb_logger.log_histogram(f'training/{k}', v, i)
+                        tb_logger.log({
                             'replay_buffer_size': len(online_replay_buffer),
                             'is_success (exploration)': int(traj['is_success']),
                         }, i)
 
                     if i % variant.eval_interval == 0:
-                        wandb_logger.log({'num_online_samples': len(online_replay_buffer)}, step=i)
-                        wandb_logger.log({'num_online_trajs': total_num_traj}, step=i)
-                        wandb_logger.log({'env_steps': total_env_steps}, step=i)
+                        tb_logger.log({'num_online_samples': len(online_replay_buffer)}, step=i)
+                        tb_logger.log({'num_online_trajs': total_num_traj}, step=i)
+                        tb_logger.log({'env_steps': total_env_steps}, step=i)
                         if hasattr(agent, 'perform_eval'):
-                            agent.perform_eval(variant, i, wandb_logger, replay_buffer, replay_buffer_iterator, eval_env)
+                            agent.perform_eval(variant, i, tb_logger, replay_buffer, replay_buffer_iterator, eval_env)
 
                     if variant.checkpoint_interval != -1:
                         if i % variant.checkpoint_interval == 0:
@@ -102,7 +101,7 @@ def add_online_data_to_buffer(variant, traj, online_replay_buffer):
         online_replay_buffer.insert(insert_dict)
     online_replay_buffer.increment_traj_counter()
 
-def collect_traj(variant, agent, env, i, agent_dp=None, wandb_logger=None, traj_id=None, robot_config=None):
+def collect_traj(variant, agent, env, i, agent_dp=None, tb_logger=None, traj_id=None, robot_config=None):
     query_frequency = variant.query_freq
     instruction = variant.instruction
     max_timesteps = robot_config['max_timesteps']
@@ -256,9 +255,9 @@ def collect_traj(variant, agent, env, i, agent_dp=None, wandb_logger=None, traj_
             rewards = -np.ones(query_steps)
             masks = np.ones(query_steps)
             
-        if wandb_logger is not None:
-            wandb_logger.log({f'is_success': int(is_success)}, step=i)
-            wandb_logger.log({f'total_num_traj': traj_id}, step=i)
+        if tb_logger is not None:
+            tb_logger.log({f'is_success': int(is_success)}, step=i)
+            tb_logger.log({f'total_num_traj': traj_id}, step=i)
 
         video_path = os.path.join(variant.outputdir, f'video_high_{traj_id}.mp4')
         video = np.stack(image_list)

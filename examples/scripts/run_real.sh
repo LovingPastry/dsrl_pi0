@@ -20,7 +20,7 @@ python3 examples/launch_train_real.py \
 --algorithm pixel_sac \
 --env franka_droid \
 --prefix dsrl_pi0_real \
---wandb_project ${proj_name} \
+--tb_project ${proj_name} \
 --batch_size 256 \
 --discount 0.99 \
 --seed 0 \

@@ -21,8 +21,7 @@ from libero.libero import get_libero_path
 from libero.libero.envs import OffScreenRenderEnv
 
 from jaxrl2.data import ReplayBuffer
-from jaxrl2.utils.wandb_logger import WandBLogger, create_exp_name
-import tempfile
+from jaxrl2.utils.tensorboard_logger import TensorBoardLogger, create_exp_name
 from functools import partial
 from examples.train_utils_sim import trajwise_alternating_training_loop
 import tensorflow as tf
@@ -63,9 +62,14 @@ class DummyEnv(gym.ObservationWrapper):
 
     def __init__(self, variant):
         self.variant = variant
-        self.image_shape = (variant.resize_image, variant.resize_image, 3 * variant.num_cameras, 1)
         obs_dict = {}
-        obs_dict['pixels'] = Box(low=0, high=255, shape=self.image_shape, dtype=np.uint8)
+        if variant.get('obs_mode', 'pixels') == 'vlm':
+            # frozen pi0 PaliGemma prefix representation (shared by actor/critic)
+            vlm_dim = variant.get('vlm_dim', 2048)
+            obs_dict['vlm'] = Box(low=-np.inf, high=np.inf, shape=(vlm_dim,), dtype=np.float32)
+        else:
+            self.image_shape = (variant.resize_image, variant.resize_image, 3 * variant.num_cameras, 1)
+            obs_dict['pixels'] = Box(low=0, high=255, shape=self.image_shape, dtype=np.uint8)
         if variant.add_states:
             if variant.env == 'libero':
                 state_dim = 8
@@ -110,14 +114,20 @@ def main(variant):
     
     if variant.env == 'libero':
         benchmark_dict = benchmark.get_benchmark_dict()
-        task_suite = benchmark_dict["libero_90"]()
-        task_id = 57
+        task_suite_name = variant.get("task_suite", "libero_90")
+        task_id = variant.get("task_id", 57)
+        task_suite = benchmark_dict[task_suite_name]()
         task = task_suite.get_task(task_id)
         env, task_description = _get_libero_env(task, 256, variant.seed)
         eval_env = env
         variant.task_description = task_description
         variant.env_max_reward = 1
-        variant.max_timesteps = 400
+        # Per-suite episode horizon, matching openpi/examples/libero/main.py.
+        _suite_max_timesteps = {"libero_spatial": 220, "libero_object": 280,
+                                "libero_goal": 300, "libero_10": 520, "libero_90": 400}
+        variant.max_timesteps = _suite_max_timesteps.get(task_suite_name, 400)
+        print(f"[task] suite={task_suite_name} id={task_id} :: {task_description!r} "
+              f"(max_timesteps={variant.max_timesteps})")
     elif variant.env == 'aloha_cube':
         from gymnasium.envs.registration import register
         register(
@@ -134,8 +144,7 @@ def main(variant):
         
 
     group_name = variant.prefix + '_' + variant.launch_group_id
-    wandb_output_dir = tempfile.mkdtemp()
-    wandb_logger = WandBLogger(variant.prefix != '', variant, variant.wandb_project, experiment_id=expname, output_dir=wandb_output_dir, group_name=group_name)
+    tb_logger = TensorBoardLogger(variant.prefix != '', variant, variant.tb_project, experiment_id=expname, output_dir=variant.outputdir, group_name=group_name)
 
     dummy_env = DummyEnv(variant)
     sample_obs = add_batch_dim(dummy_env.observation_space.sample())
@@ -154,11 +163,40 @@ def main(variant):
         raise NotImplementedError()
     agent_dp = policy_config.create_trained_policy(config, checkpoint_dir)
     print("Loaded pi0 policy from %s", checkpoint_dir)
-    agent = PixelSACLearner(variant.seed, sample_obs, sample_action, **kwargs)
+
+    env_act_dim = 7 if variant.env == 'libero' else 14
+    if variant.algorithm == 'pixel_sac_na':
+        assert variant.query_freq > 0, 'pixel_sac_na requires --query_freq > 0 (env action chunk length)'
+        from jaxrl2.agents.pixel_sac_na import PixelSACNALearner
+        sample_env_action = np.zeros((1, variant.query_freq, env_act_dim), dtype=np.float32)
+        agent = PixelSACNALearner(variant.seed, sample_obs, sample_action, sample_env_action,
+                                  qa_critic_lr=variant.get('qa_critic_lr', 3e-4), **kwargs)
+    else:
+        agent = PixelSACLearner(variant.seed, sample_obs, sample_action, **kwargs)
+
+    # DSRL-NA additionally stores the denoised executed action chunks
+    extra_fields = None
+    if variant.algorithm == 'pixel_sac_na':
+        chunk_shape = (variant.query_freq, env_act_dim)
+        extra_fields = {'env_actions': (chunk_shape, np.float32),
+                        'next_env_actions': (chunk_shape, np.float32)}
 
     online_buffer_size = variant.max_steps  // variant.multi_grad_step
-    online_replay_buffer = ReplayBuffer(dummy_env.observation_space, dummy_env.action_space, int(online_buffer_size))
+    online_replay_buffer = ReplayBuffer(dummy_env.observation_space, dummy_env.action_space, int(online_buffer_size),
+                                        extra_fields=extra_fields)
     replay_buffer = online_replay_buffer
     replay_buffer.seed(variant.seed)
-    trajwise_alternating_training_loop(variant, agent, env, eval_env, online_replay_buffer, replay_buffer, wandb_logger, shard_fn=shard_fn, agent_dp=agent_dp)
+
+    offline_replay_buffer = None
+    if variant.get('dual_buffer', 0):
+        warmup_trajs = variant.get('warmup_trajs', -1)
+        assert warmup_trajs is not None and warmup_trajs > 0, 'dual_buffer requires --warmup_trajs > 0'
+        queries_per_traj = max(variant.max_timesteps // variant.query_freq, 1)
+        offline_capacity = warmup_trajs * queries_per_traj + 8
+        offline_replay_buffer = ReplayBuffer(dummy_env.observation_space, dummy_env.action_space,
+                                             int(offline_capacity), extra_fields=extra_fields)
+        offline_replay_buffer.seed(variant.seed + 1)
+
+    trajwise_alternating_training_loop(variant, agent, env, eval_env, online_replay_buffer, replay_buffer, tb_logger, shard_fn=shard_fn, agent_dp=agent_dp,
+                                       offline_replay_buffer=offline_replay_buffer)
  

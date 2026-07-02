@@ -11,7 +11,6 @@ from jaxrl2.networks.constants import default_init, xavier_init, kaiming_init
 from functools import partial
 from typing import Any, Callable, Sequence, Tuple
 import distrax
-import wandb
 
 ModuleDef = Any
 

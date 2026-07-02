@@ -36,6 +36,43 @@ class Encoder(nn.Module):
         return x.reshape((*x.shape[:-3], -1))
     
 
+class FeatureMultiplexer(nn.Module):
+    """Multiplexer for precomputed (frozen) VLM features instead of a learned CNN.
+
+    The pi0 PaliGemma prefix representation is computed once per query step and
+    stored in the observation dict under `feature_key`; actor and critic both
+    consume this same frozen encoding (mirroring how the pi0.5 action expert
+    shares the VLM's output) and only train a small bottleneck + MLP on top.
+    """
+    network: nn.Module
+    latent_dim: int
+    use_bottleneck: bool = True
+    feature_key: str = 'vlm'
+
+    @nn.compact
+    def __call__(self,
+                 observations: Union[FrozenDict, Dict],
+                 actions: Optional[jnp.ndarray] = None,
+                 training: bool = False):
+        observations = FrozenDict(observations)
+
+        x = observations[self.feature_key].astype(jnp.float32)
+        if self.use_bottleneck:
+            x = nn.Dense(self.latent_dim, kernel_init=xavier_init())(x)
+            x = nn.LayerNorm()(x)
+            x = nn.tanh(x)
+
+        filtered = {self.feature_key: x}
+        if 'state' in observations:
+            filtered['state'] = observations['state']
+        x = FrozenDict(filtered)
+
+        if actions is None:
+            return self.network(x, training=training)
+        else:
+            return self.network(x, actions, training=training)
+
+
 class PixelMultiplexer(nn.Module):
     encoder: Union[nn.Module, list]
     network: nn.Module

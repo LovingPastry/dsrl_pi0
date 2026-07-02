@@ -20,7 +20,7 @@ from typing import Any
 
 from jaxrl2.agents.agent import Agent
 from jaxrl2.data.augmentations import batched_random_crop, color_transform
-from jaxrl2.networks.encoders.networks import Encoder, PixelMultiplexer
+from jaxrl2.networks.encoders.networks import Encoder, PixelMultiplexer, FeatureMultiplexer
 from jaxrl2.networks.encoders.impala_encoder import ImpalaEncoder, SmallerImpalaEncoder
 from jaxrl2.networks.encoders.resnet_encoderv1 import ResNet18, ResNet34, ResNetSmall
 from jaxrl2.networks.encoders.resnet_encoderv2 import ResNetV2Encoder
@@ -45,37 +45,39 @@ def _update_jit(
     discount: float, tau: float, target_entropy: float,
     critic_reduction: str, color_jitter: bool, aug_next: bool, num_cameras: int,
 ) -> Tuple[PRNGKey, TrainState, TrainState, Params, TrainState, Dict[str,float]]:
-    aug_pixels = batch['observations']['pixels']
-    aug_next_pixels = batch['next_observations']['pixels']
-    if batch['observations']['pixels'].squeeze().ndim != 2:
-        rng, key = jax.random.split(rng)
-        aug_pixels = batched_random_crop(key, batch['observations']['pixels'])
-
-        if color_jitter:
+    has_pixels = 'pixels' in batch['observations']
+    if has_pixels:
+        aug_pixels = batch['observations']['pixels']
+        aug_next_pixels = batch['next_observations']['pixels']
+        if batch['observations']['pixels'].squeeze().ndim != 2:
             rng, key = jax.random.split(rng)
-            if num_cameras > 1:
-                for i in range(num_cameras):
-                    aug_pixels = aug_pixels.at[:,:,:,i*3:(i+1)*3].set((color_transform(key, aug_pixels[:,:,:,i*3:(i+1)*3].astype(jnp.float32)/255.)*255).astype(jnp.uint8))
-            else:
-                aug_pixels = (color_transform(key, aug_pixels.astype(jnp.float32)/255.)*255).astype(jnp.uint8)
+            aug_pixels = batched_random_crop(key, batch['observations']['pixels'])
 
-    observations = batch['observations'].copy(add_or_replace={'pixels': aug_pixels})
-    batch = batch.copy(add_or_replace={'observations': observations})
+            if color_jitter:
+                rng, key = jax.random.split(rng)
+                if num_cameras > 1:
+                    for i in range(num_cameras):
+                        aug_pixels = aug_pixels.at[:,:,:,i*3:(i+1)*3].set((color_transform(key, aug_pixels[:,:,:,i*3:(i+1)*3].astype(jnp.float32)/255.)*255).astype(jnp.uint8))
+                else:
+                    aug_pixels = (color_transform(key, aug_pixels.astype(jnp.float32)/255.)*255).astype(jnp.uint8)
 
-    key, rng = jax.random.split(rng)
-    if aug_next:
-        rng, key = jax.random.split(rng)
-        aug_next_pixels = batched_random_crop(key, batch['next_observations']['pixels'])
-        if color_jitter:
+        observations = batch['observations'].copy(add_or_replace={'pixels': aug_pixels})
+        batch = batch.copy(add_or_replace={'observations': observations})
+
+        key, rng = jax.random.split(rng)
+        if aug_next:
             rng, key = jax.random.split(rng)
-            if num_cameras > 1:
-                for i in range(num_cameras):
-                    aug_next_pixels = aug_next_pixels.at[:,:,:,i*3:(i+1)*3].set((color_transform(key, aug_next_pixels[:,:,:,i*3:(i+1)*3].astype(jnp.float32)/255.)*255).astype(jnp.uint8))
-            else:
-                aug_next_pixels = (color_transform(key, aug_next_pixels.astype(jnp.float32)/255.)*255).astype(jnp.uint8)
-        next_observations = batch['next_observations'].copy(
-            add_or_replace={'pixels': aug_next_pixels})
-        batch = batch.copy(add_or_replace={'next_observations': next_observations})
+            aug_next_pixels = batched_random_crop(key, batch['next_observations']['pixels'])
+            if color_jitter:
+                rng, key = jax.random.split(rng)
+                if num_cameras > 1:
+                    for i in range(num_cameras):
+                        aug_next_pixels = aug_next_pixels.at[:,:,:,i*3:(i+1)*3].set((color_transform(key, aug_next_pixels[:,:,:,i*3:(i+1)*3].astype(jnp.float32)/255.)*255).astype(jnp.uint8))
+                else:
+                    aug_next_pixels = (color_transform(key, aug_next_pixels.astype(jnp.float32)/255.)*255).astype(jnp.uint8)
+            next_observations = batch['next_observations'].copy(
+                add_or_replace={'pixels': aug_next_pixels})
+            batch = batch.copy(add_or_replace={'next_observations': next_observations})
     
     key, rng = jax.random.split(rng)
     target_critic = critic.replace(params=target_critic_params)
@@ -123,15 +125,19 @@ class PixelSACLearner(Agent):
                  num_qs: int = 2,
                  target_entropy: float = None,
                  action_magnitude: float = 1.0,
-                 num_cameras: int = 1
+                 num_cameras: int = 1,
+                 obs_mode: str = 'pixels'
                  ):
         """
         An implementation of the version of Soft-Actor-Critic described in https://arxiv.org/abs/1812.05905
+        obs_mode: 'pixels' uses a learned CNN on images; 'vlm' consumes the frozen
+        pi0 PaliGemma prefix representation shared by actor and critic.
         """
 
         self.aug_next=aug_next
         self.color_jitter = color_jitter
         self.num_cameras = num_cameras
+        self.obs_mode = obs_mode
 
         self.action_dim = np.prod(actions.shape[-2:])
         self.action_chunk_shape = actions.shape[-2:]
@@ -143,7 +149,9 @@ class PixelSACLearner(Agent):
         rng = jax.random.PRNGKey(seed)
         rng, actor_key, critic_key, temp_key = jax.random.split(rng, 4)
 
-        if encoder_type == 'small':
+        if obs_mode == 'vlm':
+            encoder_def = None  # frozen VLM features come precomputed in the obs dict
+        elif encoder_type == 'small':
             encoder_def = Encoder(cnn_features, cnn_strides, cnn_padding)
         elif encoder_type == 'impala':
             print('using impala')
@@ -174,11 +182,17 @@ class PixelSACLearner(Agent):
         
         policy_def = LearnedStdTanhNormalPolicy(hidden_dims, self.action_dim, dropout_rate=dropout_rate, low=-action_magnitude, high=action_magnitude)
 
-        actor_def = PixelMultiplexer(encoder=encoder_def,
-                                     network=policy_def,
-                                     latent_dim=latent_dim,
-                                     use_bottleneck=use_bottleneck
-                                     )
+        if obs_mode == 'vlm':
+            actor_def = FeatureMultiplexer(network=policy_def,
+                                           latent_dim=latent_dim,
+                                           use_bottleneck=use_bottleneck
+                                           )
+        else:
+            actor_def = PixelMultiplexer(encoder=encoder_def,
+                                         network=policy_def,
+                                         latent_dim=latent_dim,
+                                         use_bottleneck=use_bottleneck
+                                         )
         print(actor_def)
         actor_def_init = actor_def.init(actor_key, observations)
         actor_params = actor_def_init['params']
@@ -190,11 +204,17 @@ class PixelSACLearner(Agent):
                                   batch_stats=actor_batch_stats)
 
         critic_def = StateActionEnsemble(hidden_dims, num_qs=num_qs)
-        critic_def = PixelMultiplexer(encoder=encoder_def,
-                                      network=critic_def,
-                                      latent_dim=latent_dim,
-                                      use_bottleneck=use_bottleneck
-                                      )
+        if obs_mode == 'vlm':
+            critic_def = FeatureMultiplexer(network=critic_def,
+                                            latent_dim=latent_dim,
+                                            use_bottleneck=use_bottleneck
+                                            )
+        else:
+            critic_def = PixelMultiplexer(encoder=encoder_def,
+                                          network=critic_def,
+                                          latent_dim=latent_dim,
+                                          use_bottleneck=use_bottleneck
+                                          )
         print(critic_def)
         critic_def_init = critic_def.init(critic_key, observations, actions)
         self._critic_init_params = critic_def_init['params']
@@ -241,9 +261,9 @@ class PixelSACLearner(Agent):
         self._temp = new_temp
         return info
 
-    def perform_eval(self, variant, i, wandb_logger, eval_buffer, eval_buffer_iterator, eval_env):
+    def perform_eval(self, variant, i, tb_logger, eval_buffer, eval_buffer_iterator, eval_env):
         from examples.train_utils_sim import make_multiple_value_reward_visulizations
-        make_multiple_value_reward_visulizations(self, variant, i, eval_buffer, wandb_logger)
+        make_multiple_value_reward_visulizations(self, variant, i, eval_buffer, tb_logger)
 
     def make_value_reward_visulization(self, variant, trajs):
         num_traj = len(trajs['rewards'])

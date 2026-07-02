@@ -18,7 +18,7 @@ python3 examples/launch_train_sim.py \
 --algorithm pixel_sac \
 --env aloha_cube \
 --prefix dsrl_pi0_aloha \
---wandb_project ${proj_name} \
+--tb_project ${proj_name} \
 --batch_size 256 \
 --discount 0.999 \
 --seed 0 \

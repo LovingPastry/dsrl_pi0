@@ -51,7 +51,7 @@ pip install -e openpi/packages/openpi-client
 
 # install Libero
 pip install -e LIBERO
-pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cpu # needed for libero
+pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cpu # needed for libero and for TensorBoard logging (torch.utils.tensorboard)
 ```
 
 ## Training (Simulation)
@@ -64,7 +64,10 @@ Aloha
 bash examples/scripts/run_aloha.sh
 ```
 ### Training Logs
-We provide sample W&B runs and logs: https://wandb.ai/mitsuhiko/DSRL_pi0_public
+Training metrics are logged to TensorBoard. Evaluation videos (`.mp4`) and value/reward visualizations (`.png`) are saved locally to the run directory under `$EXP` (in `videos/` and `images/`). View the logs with:
+```
+tensorboard --logdir $EXP
+```
 
 ## Training (Real)
 For real-world experiments, we use the remote hosting feature from pi0 (see [here](https://github.com/Physical-Intelligence/openpi/blob/main/docs/remote_inference.md)) which enables us to host the pi0 model on a higher-spec remote server, in case the robot's client machine is not powerful enough. 

@@ -10,8 +10,7 @@ import gymnasium as gym
 from gym.spaces import Dict, Box
 
 from jaxrl2.data import ReplayBuffer
-from jaxrl2.utils.wandb_logger import WandBLogger, create_exp_name
-import tempfile
+from jaxrl2.utils.tensorboard_logger import TensorBoardLogger, create_exp_name
 from functools import partial
 from examples.train_utils_real import trajwise_alternating_training_loop
 import tensorflow as tf
@@ -82,8 +81,7 @@ def main(variant):
     print('writing to output dir ', outputdir)        
 
     group_name = variant.prefix + '_' + variant.launch_group_id
-    wandb_output_dir = tempfile.mkdtemp()
-    wandb_logger = WandBLogger(variant.prefix != '', variant, variant.wandb_project, experiment_id=expname, output_dir=wandb_output_dir, group_name=group_name)
+    tb_logger = TensorBoardLogger(variant.prefix != '', variant, variant.tb_project, experiment_id=expname, output_dir=variant.outputdir, group_name=group_name)
 
     
     agent_dp = _websocket_client_policy.WebsocketClientPolicy(
@@ -125,5 +123,5 @@ def main(variant):
     online_replay_buffer = ReplayBuffer(dummy_env.observation_space, dummy_env.action_space, int(online_buffer_size))
     replay_buffer = online_replay_buffer
     replay_buffer.seed(variant.seed)
-    trajwise_alternating_training_loop(variant, agent, env, eval_env, online_replay_buffer, replay_buffer, wandb_logger, shard_fn=shard_fn, agent_dp=agent_dp, robot_config=robot_config)
+    trajwise_alternating_training_loop(variant, agent, env, eval_env, online_replay_buffer, replay_buffer, tb_logger, shard_fn=shard_fn, agent_dp=agent_dp, robot_config=robot_config)
  
