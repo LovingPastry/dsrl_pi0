@@ -77,6 +77,41 @@ bash examples/scripts/run_ablation8_aloha.sh full
 
 ---
 
+## 2b. Parallel run on a multi-GPU server
+
+`run_ablation8_aloha_parallel.sh` (ALOHA) and `run_ablation8_parallel.sh`
+(LIBERO) schedule the 8 experiments across the GPUs you list — **one experiment
+per GPU**, and if there are fewer GPUs than experiments they queue in a pool
+(each GPU grabs the next pending experiment the moment it frees).
+
+```bash
+# ALOHA, 4 usable cards — 4 run at once, the other 4 queue:
+GPUS=0,1,2,3 bash examples/scripts/run_ablation8_aloha_parallel.sh full
+
+# only cards 2 and 5 are free — all 8 still run, 2-at-a-time:
+GPUS=2,5 bash examples/scripts/run_ablation8_aloha_parallel.sh full
+
+# LIBERO parallel (same scheduler, ENV_KIND=libero is the default):
+GPUS=0,1,2,3 bash examples/scripts/run_ablation8_parallel.sh full
+
+# validate the scheduling on ANY machine — no GPU, no training (mock jobs):
+DRY_RUN=1 GPUS=0,1,2 bash examples/scripts/run_ablation8_parallel.sh full
+```
+
+- `GPUS` = comma-separated list of **usable** card IDs; arbitrary IDs are fine
+  (e.g. `2,5,7`). Defaults to `0`. Give fewer IDs than experiments and the 8 just
+  queue with lower concurrency — nothing is dropped.
+- Each job pins both `CUDA_VISIBLE_DEVICES` and `MUJOCO_EGL_DEVICE_ID` to its card
+  (compute + EGL render on the same GPU).
+- Same overridable budgets as the sequential runners (`MAX_STEPS`,
+  `EVAL_INTERVAL`, `CKPT_INTERVAL`, `EXP_ROOT`, `SUITE`/`TASK_ID` for LIBERO).
+- **⚠ Host RAM:** every parallel job loads its own frozen pi0 (**~14 GB system
+  RAM**). N-way concurrency needs ~N×14 GB RAM (plus ~10 GB VRAM per card). If the
+  box is RAM-limited, list fewer GPUs — the pool still runs all 8, just less
+  concurrently. (We OOM-killed a run this way on a 31 GB box.)
+
+---
+
 ## 3. View results
 
 ```bash
