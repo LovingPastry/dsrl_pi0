@@ -32,6 +32,11 @@ if __name__ == '__main__':
     parser.add_argument('--early_stop_success', default=1, help='1 = stop as soon as an eval hits 100%% success', type=int)
     parser.add_argument('--vlm_dim', default=2048, help='dim of the pi0 PaliGemma prefix feature (obs_mode=vlm)', type=int)
     parser.add_argument('--qa_critic_lr', default=3e-4, help='learning rate of the DSRL-NA action-space critic', type=float)
+    parser.add_argument('--multitask', default=0, help='1 = round-robin train + per-task/mean eval over --task_ids (one shared SAC agent)', type=int)
+    parser.add_argument('--task_ids', default='', help='comma-separated LIBERO task ids for multitask (empty + multitask => all tasks in the suite)', type=str)
+    parser.add_argument('--tasks_per_eval', default=-1, help='eval only K rotating tasks per eval to save time (-1 = all tasks every eval)', type=int)
+    parser.add_argument('--resume', default=0, help='1 = resume SAC params + replay buffers + step + RNG from a checkpoint in the output dir if present', type=int)
+    parser.add_argument('--max_live_envs', default=0, help='host-RAM guard: keep at most K LIBERO envs open at once (LRU close/reopen); 0 = unbounded. Use ~3 for 10-task multitask on a 31GB box.', type=int)
 
     train_args_dict = dict(
         actor_lr=1e-4,

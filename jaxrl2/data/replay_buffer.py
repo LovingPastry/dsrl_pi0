@@ -1,10 +1,11 @@
 from typing import Union
 from typing import Iterable, Optional
-import jax 
+import jax
 import gym
 import gym.spaces
 import numpy as np
 import pickle
+import os
 
 import copy
 
@@ -211,20 +212,27 @@ class ReplayBuffer(Dataset):
     def save(self, filename):
         save_dict = dict(
             data=self.data,
-            size = self.size,
-            _traj_counter = self._traj_counter,
+            size=self.size,
+            capacity=self.capacity,
+            _traj_counter=self._traj_counter,
             _start=self._start,
-            traj_bounds=self.traj_bounds
+            traj_bounds=self.traj_bounds,
         )
-        with open(filename, 'wb') as f:
+        # atomic write so a crash mid-save cannot corrupt an existing checkpoint
+        tmp = filename + '.tmp'
+        with open(tmp, 'wb') as f:
             pickle.dump(save_dict, f, protocol=4)
-
+        os.replace(tmp, filename)
 
     def restore(self, filename):
-        save_dict = np.load(filename, allow_pickle=True)[0]
-        # todo test this:
+        # NOTE: pairs with save() above (pickle, not np.load); restores the full
+        # buffer state including the (possibly grown) capacity so resume is exact.
+        with open(filename, 'rb') as f:
+            save_dict = pickle.load(f)
         self.data = save_dict['data']
         self.size = save_dict['size']
+        if 'capacity' in save_dict:
+            self.capacity = save_dict['capacity']
         self._traj_counter = save_dict['_traj_counter']
         self._start = save_dict['_start']
         self.traj_bounds = save_dict['traj_bounds']

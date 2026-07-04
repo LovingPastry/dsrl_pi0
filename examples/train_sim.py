@@ -101,7 +101,13 @@ def main(variant):
         import uuid
         variant.prefix = str(uuid.uuid4().fields[-1])[:5]
 
-    if variant.suffix:
+    if variant.get('resume', 0):
+        # resume needs a STABLE, timestamp-free output dir so that re-running the
+        # same prefix/seed lands in the same dir and finds its checkpoint.
+        expname = "%s_0000--s-%d" % (variant.prefix, variant.seed)
+        if variant.suffix:
+            expname += f"_{variant.suffix}"
+    elif variant.suffix:
         expname = create_exp_name(variant.prefix, seed=variant.seed) + f"_{variant.suffix}"
     else:
         expname = create_exp_name(variant.prefix, seed=variant.seed)
@@ -112,22 +118,42 @@ def main(variant):
         os.makedirs(outputdir)
     print('writing to output dir ', outputdir)
     
+    task_specs = None
     if variant.env == 'libero':
         benchmark_dict = benchmark.get_benchmark_dict()
-        task_suite_name = variant.get("task_suite", "libero_90")
-        task_id = variant.get("task_id", 57)
+        multitask = bool(variant.get('multitask', 0))
+        task_suite_name = variant.get("task_suite", "libero_10" if multitask else "libero_90")
         task_suite = benchmark_dict[task_suite_name]()
-        task = task_suite.get_task(task_id)
-        env, task_description = _get_libero_env(task, 256, variant.seed)
-        eval_env = env
-        variant.task_description = task_description
-        variant.env_max_reward = 1
         # Per-suite episode horizon, matching openpi/examples/libero/main.py.
         _suite_max_timesteps = {"libero_spatial": 220, "libero_object": 280,
                                 "libero_goal": 300, "libero_10": 520, "libero_90": 400}
         variant.max_timesteps = _suite_max_timesteps.get(task_suite_name, 400)
-        print(f"[task] suite={task_suite_name} id={task_id} :: {task_description!r} "
-              f"(max_timesteps={variant.max_timesteps})")
+        variant.env_max_reward = 1
+
+        if multitask:
+            ids_str = str(variant.get('task_ids', '') or '').strip()
+            if ids_str:
+                task_ids = [int(x) for x in ids_str.split(',') if x.strip() != '']
+            else:
+                n_tasks = getattr(task_suite, 'n_tasks', None) or len(getattr(task_suite, 'tasks', range(10)))
+                task_ids = list(range(n_tasks))
+        else:
+            task_ids = [variant.get("task_id", 57)]
+
+        # Task metadata; the per-task LIBERO env is built lazily on first use
+        # (round-robin / eval) so we don't hold N EGL contexts before they're
+        # needed. task_specs[0]'s env is built now for a concrete handle.
+        task_specs = [{'task_id': tid, 'task': task_suite.get_task(tid),
+                       'env': None, 'description': task_suite.get_task(tid).language}
+                      for tid in task_ids]
+        variant.num_tasks = len(task_specs)
+        env, _ = _get_libero_env(task_specs[0]['task'], 256, variant.seed)
+        task_specs[0]['env'] = env
+        variant['_live_env_idx'] = [0]  # track the eager env so --max_live_envs is a hard cap
+        eval_env = env
+        variant.task_description = task_specs[0]['description']
+        print(f"[libero multitask={multitask}] suite={task_suite_name} tasks={task_ids} "
+              f"(num_tasks={variant.num_tasks}, max_timesteps={variant.max_timesteps})")
     elif variant.env == 'aloha_cube':
         from gymnasium.envs.registration import register
         register(
@@ -198,5 +224,5 @@ def main(variant):
         offline_replay_buffer.seed(variant.seed + 1)
 
     trajwise_alternating_training_loop(variant, agent, env, eval_env, online_replay_buffer, replay_buffer, tb_logger, shard_fn=shard_fn, agent_dp=agent_dp,
-                                       offline_replay_buffer=offline_replay_buffer)
+                                       offline_replay_buffer=offline_replay_buffer, task_specs=task_specs)
  
