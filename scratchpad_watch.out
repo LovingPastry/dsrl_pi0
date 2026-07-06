@@ -1,0 +1,12 @@
+=== EVAL DONE (baseline pi0 success rate) ===
+36:Loaded pi0 policy from %s /media/fuyx/系统/lanzc/openpi_data_home/openpi-assets/checkpoints/pi0_libero
+199:performing evaluation for initial checkpoint
+222:Rollout 0 : episode_return=1.0, Success: True
+247:Rollout 1 : episode_return=1.0, Success: True
+273:Rollout 2 : episode_return=1.0, Success: True
+314:Rollout 3 : episode_return=0.0, Success: False
+355:  0%|          | 1/800 [01:19<17:34:00, 79.15s/it]  0%|          | 2/800 [01:30<8:40:32, 39.14s/it]   0%|          | 3/800 [01:41<5:50:39, 26.40s/it]  2%|▏         | 16/800 [01:41<36:28,  2.79s/it]   4%|▎         | 29/800 [01:41<15:49,  1.23s/it]  5%|▌         | 40/800 [01:41<09:21,  1.35it/s]  6%|▋         | 50/800 [01:41<06:06,  2.05it/s]  8%|▊         | 60/800 [01:42<04:04,  3.02it/s]  9%|▉         | 70/800 [01:42<02:46,  4.37it/s] 10%|█         | 80/800 [01:42<01:55,  6.25it/s] 11%|█▏        | 90/800 [01:42<01:21,  8.74it/s] 12%|█▏        | 99/800 [01:42<00:59, 11.75it/s] 14%|█▎        | 108/800 [01:42<00:44, 15.55it/s] 15%|█▍        | 117/800 [01:42<00:33, 20.47it/s] 16%|█▌        | 126/800 [01:42<00:25, 26.48it/s] 17%|█▋        | 135/800 [01:42<00:19, 33.47it/s] 18%|█▊        | 144/800 [01:43<00:15, 41.09it/s] 19%|█▉        | 153/800 [01:43<00:13, 48.83it/s] 20%|██        | 162/800 [01:43<00:11, 56.28it/s] 22%|██▏       | 172/800 [01:43<00:09, 64.06it/s] 23%|██▎       | 181/800 [01:43<00:08, 69.73it/s] 24%|██▍       | 190/800 [01:43<00:08, 74.18it/s] 25%|██▍       | 199/800 [01:43<00:07, 78.00it/s]Rollout 4 : episode_return=0.0, Success: False
+357:Success rate: 0.6
+358:Average return: 0.6
+360:Reward >= 0: 5/5 = 100.0%
+361:Reward >= 1: 3/5 = 60.0%
