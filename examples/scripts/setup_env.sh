@@ -12,10 +12,10 @@
 #   ENV_NAME=dsrl_pi0 PY_VER=3.11 CKPTS="pi0_aloha_sim pi0_libero" \
 #   OPENPI_DATA_HOME=/big/disk/openpi_data_home bash examples/scripts/setup_env.sh
 #
-# NOTE on GPU: this repo is pinned to jax 0.5.0. The cuDNN/CUDA runtime must
-# match your GPU driver. This project was validated with CUDA 12.8 + cuDNN
-# 9.10.2 on driver 575. If JAX fails to initialise cuDNN, install a matching
-# CUDA/cuDNN set (see docs/) rather than changing the jax version.
+# NOTE on GPU: this repo is pinned to jax 0.5.0 for pre-Blackwell GPUs.
+# RTX 50-series (Blackwell, sm_120) cards require jax 0.6.2+ and a distrax
+# compat patch (patch_distrax_jax060.sh). The script auto-detects the GPU and
+# picks the right jax version.
 # ============================================================================
 set -euo pipefail
 
@@ -48,8 +48,26 @@ conda activate "$ENV_NAME"
 # --- 2. python dependencies -------------------------------------------------
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
-# GPU JAX (cuda12 extra pulls the matching pjrt/plugin wheels for jax 0.5.0)
-python -m pip install -U "jax[cuda12]==0.5.0"
+
+# Detect RTX 50-series (Blackwell, compute capability >= 12.0) and pick the right
+# jax version. 50-series cards need jax >= 0.6.2 for sm_120 codegen and fp8 fixes;
+# older cards stick to the pinned jax 0.5.0.
+IS_BLACKWELL=0
+if command -v nvidia-smi &>/dev/null && nvidia-smi -L &>/dev/null; then
+  while IFS= read -r cap; do
+    major=$(echo "$cap" | cut -d. -f1)
+    if [ "$major" -ge 12 ]; then IS_BLACKWELL=1; break; fi
+  done < <(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null || true)
+fi
+
+if [ "$IS_BLACKWELL" -eq 1 ]; then
+  echo "[setup] Blackwell (RTX 50-series) detected — installing jax 0.6.2 + distrax compat patch"
+  python -m pip install -U "jax[cuda12]==0.6.2"
+  bash "$REPO_DIR/examples/scripts/patch_distrax_jax060.sh"
+else
+  echo "[setup] pre-Blackwell GPU (or none) — installing jax 0.5.0"
+  python -m pip install -U "jax[cuda12]==0.5.0"
+fi
 # ALOHA sim (gym-aloha) renders through mujoco 2.3.7 under EGL; newer mujoco breaks it
 python -m pip install mujoco==2.3.7
 # editable submodule packages

@@ -3,15 +3,20 @@
 # 8-condition DSRL ablation on the ALOHA cube-transfer sim (gym-aloha).
 # Mirrors run_ablation8.sh (LIBERO) but for --env aloha_cube.
 #
-# The 8 conditions (baseline + the 3 improvements and their combinations):
-#   baseline      original DSRL-SAC (learned CNN obs, single replay buffer)
-#   vlm           improvement 1: actor+critic share the frozen pi0 VLM encoding
-#   buf1          improvement 2a: exactly 10 Gaussian warmup trajs, single buffer
-#   buf2          improvement 2b: 10 frozen warmup trajs + growing online buffer (50/50)
-#   na            improvement 3: DSRL-NA (action-space critic Q_A + noise critic Q_W)
-#   vlm_buf2      1 + 2b
-#   na_buf2       3 + 2b
-#   vlm_na_buf2   1 + 2b + 3 (all improvements)
+# 2³ factorial ablation across three modules:
+#   Module 1 (obs):      CNN (off) vs VLM (on)        → --obs_mode vlm
+#   Module 2 (buffer):   single (off) vs dual (on)    → --dual_buffer 1
+#   Module 3 (alg):      pixel_sac (off) vs NA (on)   → --algorithm pixel_sac_na
+#   All 8 conditions share --warmup_trajs N (Gaussian exploration before updates).
+#
+#   baseline      CNN  + single + SAC     (0,0,0)
+#   vlm           VLM  + single + SAC     (1,0,0)
+#   buf2          CNN  + dual   + SAC     (0,1,0)
+#   vlm_buf2      VLM  + dual   + SAC     (1,1,0)
+#   na            CNN  + single + NA      (0,0,1)
+#   vlm_na        VLM  + single + NA      (1,0,1)
+#   na_buf2       CNN  + dual   + NA      (0,1,1)
+#   vlm_na_buf2   VLM  + dual   + NA      (1,1,1)
 #
 # Usage (after setup_env.sh):
 #   bash examples/scripts/run_ablation8_aloha.sh full            # all 8, 250k steps
@@ -27,7 +32,7 @@ set -e
 MODE=${1:-smoke}; shift || true
 VARIANTS=("$@")
 if [ ${#VARIANTS[@]} -eq 0 ]; then
-  VARIANTS=(baseline vlm buf1 buf2 na na_buf2 vlm_buf2 vlm_na_buf2)
+  VARIANTS=(baseline vlm buf2 vlm_buf2 na vlm_na na_buf2 vlm_na_buf2)
 fi
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -85,12 +90,12 @@ COMMON+=(--algorithm pixel_sac --env aloha_cube
 
 variant_flags() {
   case "$1" in
-    baseline)     echo "" ;;
-    vlm)          echo "--obs_mode vlm" ;;
-    buf1)         echo "--warmup_trajs $WARMUP_N" ;;
+    baseline)     echo "--warmup_trajs $WARMUP_N" ;;
+    vlm)          echo "--obs_mode vlm --warmup_trajs $WARMUP_N" ;;
     buf2)         echo "--warmup_trajs $WARMUP_N --dual_buffer 1" ;;
-    na)           echo "--algorithm pixel_sac_na" ;;
+    na)           echo "--algorithm pixel_sac_na --warmup_trajs $WARMUP_N" ;;
     vlm_buf2)     echo "--obs_mode vlm --warmup_trajs $WARMUP_N --dual_buffer 1" ;;
+    vlm_na)       echo "--obs_mode vlm --algorithm pixel_sac_na --warmup_trajs $WARMUP_N" ;;
     na_buf2)      echo "--algorithm pixel_sac_na --warmup_trajs $WARMUP_N --dual_buffer 1" ;;
     vlm_na_buf2)  echo "--obs_mode vlm --algorithm pixel_sac_na --warmup_trajs $WARMUP_N --dual_buffer 1" ;;
     *) echo "UNKNOWN" ;;

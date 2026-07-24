@@ -27,7 +27,7 @@ set -u
 MODE=${1:-smoke}; shift || true
 VARIANTS=("$@")
 if [ ${#VARIANTS[@]} -eq 0 ]; then
-  VARIANTS=(baseline vlm buf1 buf2 na na_buf2 vlm_buf2 vlm_na_buf2)
+  VARIANTS=(baseline vlm buf2 vlm_buf2 na vlm_na na_buf2 vlm_na_buf2)
 fi
 
 GPUS=${GPUS:-0}
@@ -82,12 +82,12 @@ COMMON+=(--algorithm pixel_sac "${ENV_FLAGS[@]}" --tb_project "$EXP_NAME"
 
 variant_flags() {
   case "$1" in
-    baseline)     echo "" ;;
-    vlm)          echo "--obs_mode vlm" ;;
-    buf1)         echo "--warmup_trajs $WARMUP_N" ;;
+    baseline)     echo "--warmup_trajs $WARMUP_N" ;;
+    vlm)          echo "--obs_mode vlm --warmup_trajs $WARMUP_N" ;;
     buf2)         echo "--warmup_trajs $WARMUP_N --dual_buffer 1" ;;
-    na)           echo "--algorithm pixel_sac_na" ;;
+    na)           echo "--algorithm pixel_sac_na --warmup_trajs $WARMUP_N" ;;
     vlm_buf2)     echo "--obs_mode vlm --warmup_trajs $WARMUP_N --dual_buffer 1" ;;
+    vlm_na)       echo "--obs_mode vlm --algorithm pixel_sac_na --warmup_trajs $WARMUP_N" ;;
     na_buf2)      echo "--algorithm pixel_sac_na --warmup_trajs $WARMUP_N --dual_buffer 1" ;;
     vlm_na_buf2)  echo "--obs_mode vlm --algorithm pixel_sac_na --warmup_trajs $WARMUP_N --dual_buffer 1" ;;
     *) echo "UNKNOWN" ;;
